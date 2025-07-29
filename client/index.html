@@ -2,10 +2,93 @@
 <html>
   <head>
     <title>Video Room</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 20px;
+        background-color: #f0f0f0;
+      }
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+      .video-container {
+        display: flex;
+        gap: 20px;
+        margin-bottom: 20px;
+      }
+      .video-wrapper {
+        flex: 1;
+        background: #000;
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      video {
+        width: 100%;
+        height: 300px;
+        object-fit: cover;
+      }
+      .status {
+        background: #fff;
+        padding: 15px;
+        border-radius: 8px;
+        margin-bottom: 20px;
+      }
+      .controls {
+        background: #fff;
+        padding: 15px;
+        border-radius: 8px;
+      }
+      button {
+        background: #007bff;
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        border-radius: 4px;
+        cursor: pointer;
+        margin-right: 10px;
+      }
+      button:hover {
+        background: #0056b3;
+      }
+      .error {
+        color: #dc3545;
+        background: #f8d7da;
+        padding: 10px;
+        border-radius: 4px;
+        margin-bottom: 10px;
+      }
+    </style>
   </head>
-  <body onload="joinRoom()">
-    <video id="localVideo" autoplay muted></video>
-    <video id="remoteVideo" autoplay></video>
+  <body>
+    <div class="container">
+      <h1>Video Room</h1>
+
+      <div class="status" id="status">
+        <div>상태: <span id="connectionStatus">연결 중...</span></div>
+        <div>사용자 ID: <span id="userId">-</span></div>
+        <div>방 인원: <span id="userCount">-</span></div>
+      </div>
+
+      <div class="video-container">
+        <div class="video-wrapper">
+          <h3>내 화면</h3>
+          <video id="localVideo" autoplay muted playsinline></video>
+        </div>
+        <div class="video-wrapper">
+          <h3>상대방 화면</h3>
+          <video id="remoteVideo" autoplay playsinline></video>
+        </div>
+      </div>
+
+      <div class="controls">
+        <button onclick="toggleVideo()">비디오 끄기/켜기</button>
+        <button onclick="toggleAudio()">오디오 끄기/켜기</button>
+        <button onclick="shareScreen()">화면 공유</button>
+      </div>
+    </div>
+
     <script src="https://cdn.socket.io/4.5.0/socket.io.min.js"></script>
     <script src="main.js"></script>
   </body>
