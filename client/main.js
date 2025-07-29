@@ -1,7 +1,6 @@
 const socket = io('http://localhost:3000');
-let peerConnection;
+let peerConnections = new Map(); // userId -> RTCPeerConnection
 let localStream;
-let isInitiator = false;
 let currentUserId = '';
 
 // STUN 서버 설정
@@ -29,6 +28,48 @@ function updateUserCount(count) {
   console.log('User count updated:', count);
 }
 
+// 비디오 요소 생성 함수
+function createVideoElement(userId, isLocal = false) {
+  // 이미 존재하는지 확인
+  if (document.getElementById(`video-${userId}`)) {
+    console.log(`Video element for ${userId} already exists`);
+    return document.getElementById(`video-${userId}`);
+  }
+
+  const videoContainer = document.getElementById('videoContainer');
+
+  const videoWrapper = document.createElement('div');
+  videoWrapper.className = 'video-wrapper';
+  videoWrapper.id = `wrapper-${userId}`;
+
+  const title = document.createElement('h3');
+  title.textContent = isLocal ? '내 화면' : `사용자 ${userId}`;
+
+  const video = document.createElement('video');
+  video.id = `video-${userId}`;
+  video.autoplay = true;
+  video.playsinline = true;
+  if (isLocal) {
+    video.muted = true;
+  }
+
+  videoWrapper.appendChild(title);
+  videoWrapper.appendChild(video);
+  videoContainer.appendChild(videoWrapper);
+
+  console.log(`Created video element for ${userId}`);
+  return video;
+}
+
+// 비디오 요소 제거 함수
+function removeVideoElement(userId) {
+  const videoWrapper = document.getElementById(`wrapper-${userId}`);
+  if (videoWrapper) {
+    videoWrapper.remove();
+    console.log(`Removed video element for ${userId}`);
+  }
+}
+
 async function joinRoom() {
   const userId = `user_${Math.random().toString(36).slice(2)}`;
   console.log('Joining room with userId:', userId);
@@ -45,50 +86,9 @@ async function joinRoom() {
     console.log('Media devices accessed successfully');
 
     // 로컬 비디오 표시
-    const localVideo = document.getElementById('localVideo');
+    const localVideo = createVideoElement(userId, true);
     localVideo.srcObject = localStream;
     console.log('Local video stream set');
-
-    // WebRTC 연결 설정
-    console.log('Creating RTCPeerConnection...');
-    peerConnection = new RTCPeerConnection(configuration);
-
-    // 로컬 스트림을 피어 연결에 추가
-    localStream.getTracks().forEach((track) => {
-      peerConnection.addTrack(track, localStream);
-      console.log('Added track to peer connection:', track.kind);
-    });
-
-    // 원격 스트림 처리
-    peerConnection.ontrack = (event) => {
-      console.log('Received remote stream');
-      const remoteVideo = document.getElementById('remoteVideo');
-      remoteVideo.srcObject = event.streams[0];
-      updateStatus('화상 통화 연결됨');
-    };
-
-    // ICE 후보 처리
-    peerConnection.onicecandidate = (event) => {
-      if (event.candidate) {
-        console.log('Sending ICE candidate');
-        socket.emit('signal', {
-          signal: event.candidate,
-          type: 'candidate',
-        });
-      }
-    };
-
-    // ICE 연결 상태 변경 처리
-    peerConnection.oniceconnectionstatechange = () => {
-      console.log('ICE connection state:', peerConnection.iceConnectionState);
-      updateStatus(`ICE 상태: ${peerConnection.iceConnectionState}`);
-    };
-
-    // 연결 상태 변경 처리
-    peerConnection.onconnectionstatechange = () => {
-      console.log('Connection state:', peerConnection.connectionState);
-      updateStatus(`연결 상태: ${peerConnection.connectionState}`);
-    };
 
     // Socket.IO 이벤트 리스너 설정
     setupSocketListeners();
@@ -107,6 +107,17 @@ async function joinRoom() {
 function setupSocketListeners() {
   console.log('Setting up socket listeners...');
 
+  // 방 사용자 목록 수신
+  socket.on('roomUsers', (data) => {
+    console.log('Room users received:', data.users);
+    // 기존 사용자들과 연결 설정
+    data.users.forEach((userId) => {
+      if (userId !== currentUserId && !peerConnections.has(userId)) {
+        createPeerConnection(userId);
+      }
+    });
+  });
+
   // 시그널 수신 처리
   socket.on('signal', async (data) => {
     const { signal, fromUserId } = data;
@@ -118,6 +129,8 @@ function setupSocketListeners() {
     );
 
     try {
+      let peerConnection = peerConnections.get(fromUserId);
+
       if (signal.type === 'offer') {
         console.log('Received offer, creating answer');
         await peerConnection.setRemoteDescription(
@@ -129,6 +142,7 @@ function setupSocketListeners() {
         socket.emit('signal', {
           signal: peerConnection.localDescription,
           type: 'answer',
+          targetUserId: fromUserId,
         });
       } else if (signal.type === 'answer') {
         console.log('Received answer');
@@ -149,20 +163,25 @@ function setupSocketListeners() {
     console.log('New user joined:', data.userId);
     updateStatus('새 사용자 입장');
 
-    if (!isInitiator) {
-      isInitiator = true;
-      console.log('Creating offer as initiator');
+    // 새 사용자와의 연결 생성 (중복 방지)
+    if (!peerConnections.has(data.userId)) {
+      createPeerConnection(data.userId);
 
-      try {
-        const offer = await peerConnection.createOffer();
-        await peerConnection.setLocalDescription(offer);
+      // 새 사용자에게 offer 전송
+      const peerConnection = peerConnections.get(data.userId);
+      if (peerConnection) {
+        try {
+          const offer = await peerConnection.createOffer();
+          await peerConnection.setLocalDescription(offer);
 
-        socket.emit('signal', {
-          signal: peerConnection.localDescription,
-          type: 'offer',
-        });
-      } catch (error) {
-        console.error('Error creating offer:', error);
+          socket.emit('signal', {
+            signal: peerConnection.localDescription,
+            type: 'offer',
+            targetUserId: data.userId,
+          });
+        } catch (error) {
+          console.error('Error creating offer:', error);
+        }
       }
     }
   });
@@ -171,6 +190,16 @@ function setupSocketListeners() {
   socket.on('userLeft', (data) => {
     console.log('User left:', data.userId);
     updateStatus('사용자 퇴장');
+
+    // 연결 정리
+    const peerConnection = peerConnections.get(data.userId);
+    if (peerConnection) {
+      peerConnection.close();
+      peerConnections.delete(data.userId);
+    }
+
+    // 비디오 요소 제거
+    removeVideoElement(data.userId);
   });
 
   // 방 정보 수신
@@ -194,6 +223,59 @@ function setupSocketListeners() {
     console.error('Connection error:', error);
     updateStatus('서버 연결 실패');
   });
+}
+
+function createPeerConnection(targetUserId) {
+  console.log('Creating peer connection for:', targetUserId);
+
+  const peerConnection = new RTCPeerConnection(configuration);
+  peerConnections.set(targetUserId, peerConnection);
+
+  // 로컬 스트림을 피어 연결에 추가
+  localStream.getTracks().forEach((track) => {
+    peerConnection.addTrack(track, localStream);
+    console.log('Added track to peer connection:', track.kind);
+  });
+
+  // 원격 스트림 처리
+  peerConnection.ontrack = (event) => {
+    console.log('Received remote stream from:', targetUserId);
+    const remoteVideo = createVideoElement(targetUserId);
+    remoteVideo.srcObject = event.streams[0];
+    updateStatus('화상 통화 연결됨');
+  };
+
+  // ICE 후보 처리
+  peerConnection.onicecandidate = (event) => {
+    if (event.candidate) {
+      console.log('Sending ICE candidate to:', targetUserId);
+      socket.emit('signal', {
+        signal: event.candidate,
+        type: 'candidate',
+        targetUserId,
+      });
+    }
+  };
+
+  // ICE 연결 상태 변경 처리
+  peerConnection.oniceconnectionstatechange = () => {
+    console.log(
+      `ICE connection state for ${targetUserId}:`,
+      peerConnection.iceConnectionState,
+    );
+    updateStatus(`ICE 상태: ${peerConnection.iceConnectionState}`);
+  };
+
+  // 연결 상태 변경 처리
+  peerConnection.onconnectionstatechange = () => {
+    console.log(
+      `Connection state for ${targetUserId}:`,
+      peerConnection.connectionState,
+    );
+    updateStatus(`연결 상태: ${peerConnection.connectionState}`);
+  };
+
+  return peerConnection;
 }
 
 // 컨트롤 함수들
@@ -226,17 +308,19 @@ async function shareScreen() {
       audio: false,
     });
 
-    const localVideo = document.getElementById('localVideo');
+    const localVideo = document.getElementById(`video-${currentUserId}`);
     localVideo.srcObject = screenStream;
 
-    // 기존 비디오 트랙 제거하고 화면 공유 트랙 추가
-    const senders = peerConnection.getSenders();
-    const videoSender = senders.find(
-      (sender) => sender.track?.kind === 'video',
+    // 모든 피어 연결에 화면 공유 트랙 추가
+    const senders = Array.from(peerConnections.values()).map((pc) =>
+      pc.getSenders().find((sender) => sender.track?.kind === 'video'),
     );
-    if (videoSender) {
-      videoSender.replaceTrack(screenStream.getVideoTracks()[0]);
-    }
+
+    senders.forEach((sender) => {
+      if (sender) {
+        sender.replaceTrack(screenStream.getVideoTracks()[0]);
+      }
+    });
 
     updateStatus('화면 공유 중');
   } catch (error) {
@@ -256,8 +340,10 @@ window.addEventListener('beforeunload', () => {
   if (localStream) {
     localStream.getTracks().forEach((track) => track.stop());
   }
-  if (peerConnection) {
-    peerConnection.close();
-  }
+
+  // 모든 피어 연결 정리
+  peerConnections.forEach((pc) => pc.close());
+  peerConnections.clear();
+
   socket.emit('disconnect');
 });
