@@ -2,6 +2,7 @@ const socket = io('http://localhost:3000');
 let peerConnections = new Map(); // userId -> RTCPeerConnection
 let localStream;
 let currentUserId = '';
+let grpcClient = null;
 
 // STUN 서버 설정
 const configuration = {
@@ -17,6 +18,11 @@ function updateStatus(message) {
   document.getElementById('connectionStatus').textContent = message;
 }
 
+function updateGrpcStatus(message) {
+  console.log('gRPC Status update:', message);
+  document.getElementById('grpcStatus').textContent = message;
+}
+
 function updateUserId(userId) {
   currentUserId = userId;
   document.getElementById('userId').textContent = userId;
@@ -26,6 +32,72 @@ function updateUserId(userId) {
 function updateUserCount(count) {
   document.getElementById('userCount').textContent = count;
   console.log('User count updated:', count);
+}
+
+// gRPC 클라이언트 초기화
+async function initGrpcClient() {
+  try {
+    // gRPC 클라이언트 생성 (브라우저에서는 직접 사용할 수 없으므로 HTTP 프록시 사용)
+    updateGrpcStatus('화상룸 클라이언트 초기화 중...');
+
+    // 간단한 HTTP 요청으로 gRPC 기능 시뮬레이션
+    const response = await fetch('http://localhost:3000/grpc/health');
+    if (response.ok) {
+      updateGrpcStatus('화상룸 연결됨');
+      return true;
+    } else {
+      updateGrpcStatus('화상룸 연결 실패');
+      return false;
+    }
+  } catch (error) {
+    console.error('화상룸 초기화 실패:', error);
+    updateGrpcStatus('화상룸 연결 실패');
+    return false;
+  }
+}
+
+// gRPC를 통한 방 입장
+async function joinRoomViaGrpc(userId) {
+  try {
+    const response = await fetch('http://localhost:3000/grpc/join', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ userId }),
+    });
+
+    const result = await response.json();
+    console.log('gRPC Join result:', result);
+
+    if (result.success) {
+      updateGrpcStatus('화상룸 입장 성공');
+      return true;
+    } else {
+      updateGrpcStatus('화상룸 입장 실패');
+      return false;
+    }
+  } catch (error) {
+    console.error('화상룸 입장 실패:', error);
+    updateGrpcStatus('화상룸 입장 실패');
+    return false;
+  }
+}
+
+// gRPC 테스트 함수
+async function testGrpc() {
+  try {
+    updateGrpcStatus('화상룸 연결 테스트 중...');
+    const success = await joinRoomViaGrpc(currentUserId);
+    if (success) {
+      alert('화상룸 연결 테스트 성공!');
+    } else {
+      alert('화상룸 연결 테스트 실패!');
+    }
+  } catch (error) {
+    console.error('화상룸 연결 테스트 실패:', error);
+    alert('화상룸 연결 테스트 실패!');
+  }
 }
 
 // 비디오 요소 생성 함수
@@ -77,6 +149,15 @@ async function joinRoom() {
   updateStatus('카메라 접근 중...');
 
   try {
+    // gRPC 클라이언트 초기화
+    await initGrpcClient();
+
+    // gRPC를 통한 방 입장
+    const grpcSuccess = await joinRoomViaGrpc(userId);
+    if (!grpcSuccess) {
+      console.log('화상룸 입장 실패, Socket.IO로 대체');
+    }
+
     // 미디어 스트림 가져오기
     console.log('Requesting media devices...');
     localStream = await navigator.mediaDevices.getUserMedia({
