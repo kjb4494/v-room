@@ -20,7 +20,6 @@ Nest.js, WebRTC, socket.io 기반으로 실시간 화상룸 기능을 구현한 
 - **Backend**: NestJS, Socket.IO, gRPC
 - **Frontend**: Vanilla JavaScript, WebRTC
 - **통신**: WebRTC (P2P), Socket.IO (시그널링)
-- **배포**: Vercel (서버리스)
 
 ## 🚀 프로젝트 구동 방법
 
